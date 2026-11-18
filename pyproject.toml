@@ -1,0 +1,13 @@
+[project]
+name = "options-lab"
+version = "0.1.0"
+description = "Local options data collection, valuation and synthetic replay"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100

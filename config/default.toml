@@ -1,0 +1,24 @@
+[collection]
+underlying = "AAPL"
+min_days_to_expiry = 14
+max_days_to_expiry = 28
+strike_band_fraction = 0.05
+nearest_strikes = 3
+interval_seconds = 900
+
+[model]
+# Fixed scenarios, annual decimals. Rates and yield are continuously compounded.
+rate = 0.04
+dividend_yield = 0.005
+volatility = 0.25
+
+[quality]
+max_age_seconds = 300
+max_skew_seconds = 60
+
+[simulation]
+initial_cash_usd = 1000.00
+entry_buffer_per_share = 0.25
+fee_per_contract_usd = 0.65
+slippage_per_share = 0.01
+hold_minutes = 30

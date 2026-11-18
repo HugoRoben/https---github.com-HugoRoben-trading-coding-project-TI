@@ -1,0 +1,4 @@
+# Notebook-only dependencies, tested with the project's Python 3.12 environment.
+ipykernel==6.29.4
+pandas==2.2.2
+python-dotenv==1.2.2

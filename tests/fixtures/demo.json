@@ -1,0 +1,22 @@
+{
+  "description": "Invented USD prices for one synthetic stock. The replay close is scheduled before the first decision.",
+  "underlying": "DEMO",
+  "expiry_at": "2025-02-21T21:00:00Z",
+  "session_close": "2025-02-03T16:00:02Z",
+  "contracts": [
+    {"symbol": "DEMO-C100", "kind": "call", "strike": 100.0, "currency": "USD", "multiplier": 100.0, "exercise_style": "european"},
+    {"symbol": "DEMO-P100", "kind": "put",  "strike": 100.0, "currency": "USD", "multiplier": 100.0, "exercise_style": "european"}
+  ],
+  "observations": [
+    {"id": "demo-01", "retrieved_at": "2025-02-03T15:00:02Z", "underlying_at": "2025-02-03T15:00:00Z", "spot": 100.0,
+     "quotes": {"DEMO-C100": ["2025-02-03T15:00:01Z", 1.40, 1.50], "DEMO-P100": ["2025-02-03T15:00:01Z", 2.05, 2.15]}},
+    {"id": "demo-02", "retrieved_at": "2025-02-03T15:15:02Z", "underlying_at": "2025-02-03T15:15:00Z", "spot": 100.2,
+     "quotes": {"DEMO-C100": ["2025-02-03T15:15:01Z", 1.50, 1.60], "DEMO-P100": ["2025-02-03T15:15:01Z", 1.95, 2.05]}},
+    {"id": "demo-03", "retrieved_at": "2025-02-03T15:30:02Z", "underlying_at": "2025-02-03T15:30:00Z", "spot": 100.8,
+     "quotes": {"DEMO-C100": ["2025-02-03T15:30:01Z", 1.90, 2.00], "DEMO-P100": ["2025-02-03T15:00:01Z", 2.05, 2.15]}},
+    {"id": "demo-04", "retrieved_at": "2025-02-03T15:45:03Z", "underlying_at": "2025-02-03T15:45:02Z", "spot": 101.0,
+     "quotes": {"DEMO-C100": ["2025-02-03T15:45:02Z", 2.10, 2.20], "DEMO-P100": ["2025-02-03T15:45:01Z", 1.75, 1.85]}},
+    {"id": "demo-05", "retrieved_at": "2025-02-03T16:00:02Z", "underlying_at": "2025-02-03T16:00:00Z", "spot": 101.2,
+     "quotes": {"DEMO-C100": ["2025-02-03T16:00:01Z", 2.15, 2.25], "DEMO-P100": ["2025-02-03T16:00:01Z", 1.70, 1.80]}}
+  ]
+}
