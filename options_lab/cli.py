@@ -4,15 +4,31 @@ import json
 from pathlib import Path
 import sqlite3
 import sys
-import time
+from time import sleep
 
-from .config import ROOT, load_settings
+from modules.alpaca.normalization import normalize
+from modules.alpaca.retrieval import iter_captures
+from modules.euronext.retrieval import fetch_trades
+from modules.models.simulation import replay
+from modules.storage_reporting.amsterdam import (
+    amsterdam_database,
+    read_report,
+    save_window,
+    write_trade_report,
+)
+from modules.storage_reporting.database import (
+    database,
+    latest_market_id,
+    provenance,
+    read_snapshot,
+    save_snapshot,
+)
+from modules.storage_reporting.raw_captures import archive
+from modules.storage_reporting.reporting import write_run
+
+from .config import ROOT, AmsterdamSettings, load_settings
 from .domain import digest
 from .fixtures import FIXTURE, fixture_inputs
-from .ingestion import archive, authenticated_get, fetch_capture, normalize
-from .reporting import write_run
-from .simulation import replay
-from .storage import database, latest_market_id, provenance, read_snapshot, save_snapshot
 from .validation import quality_flags
 
 
@@ -47,7 +63,9 @@ def parser():
     commands.add_parser("init-db", help="initialize the local market database")
     commands.add_parser("demo", help="import synthetic captures and run the offline replay")
     commands.add_parser("replay", help="replay the stored demo captures")
-    collect = commands.add_parser("collect", help="collect a bounded session of Alpaca market data")
+    collect = commands.add_parser(
+        "collect", help="collect market data using the selected configuration"
+    )
     collect.add_argument("--count", type=positive_int, default=1)
     collect.add_argument(
         "--interval-seconds", type=positive_int, help="pause between completed captures"
@@ -57,14 +75,55 @@ def parser():
     )
     value = commands.add_parser("value", help="value a stored market snapshot")
     value.add_argument("--capture", help="capture ID, defaults to latest market capture")
-    imp = commands.add_parser("import-capture", help="reimport a raw Alpaca JSON capture")
+    imp = commands.add_parser(
+        "import-capture", help="reimport an archived capture using its market configuration"
+    )
     imp.add_argument("path", type=Path)
     return p
+
+
+def run_amsterdam(args, settings: AmsterdamSettings) -> Path | None:
+    market = settings.euronext
+    if args.command in ("demo", "replay"):
+        raise ValueError(
+            "The synthetic USD replay uses config/default.toml. Use collect or value for Amsterdam trades."
+        )
+    with amsterdam_database(args.data_dir) as db:
+        if args.command == "init-db":
+            print(f"Amsterdam database ready: {args.data_dir / 'amsterdam.sqlite3'}")
+        elif args.command == "value":
+            info, rows = read_report(db, settings, args.capture)
+            if info is None:
+                raise ValueError(
+                    "No matching Amsterdam capture. Run collect with this configuration first."
+                )
+            path = write_trade_report(args.report_dir, info, rows, settings)
+            print(f"{len(rows)} Amsterdam option trades | EUR per share | {path}")
+            return path
+        elif args.command == "import-capture":
+            capture_id, count = save_window(
+                db, json.loads(args.path.read_text()), args.data_dir, settings
+            )
+            print(f"{capture_id} | {count} Amsterdam option executions in archived window")
+        elif args.command == "collect":
+            for i in range(args.count):
+                if i:
+                    sleep(args.interval_seconds or market.interval_seconds)
+                raw = fetch_trades(market, args.expiry)
+                capture_id, count = save_window(db, raw, args.data_dir, settings)
+                print(
+                    f"{capture_id} | {market.underlying} Amsterdam | {count} option executions "
+                    f"in delayed window | retrieved {raw['retrieved_at']}",
+                    flush=True,
+                )
+    return None
 
 
 def run(args) -> Path | None:
     """Run a project command and return its saved report directory when applicable."""
     settings = load_settings(args.config)
+    if isinstance(settings, AmsterdamSettings):
+        return run_amsterdam(args, settings)
     demo = args.command in ("demo", "replay")
     db_path = args.data_dir / ("demo.sqlite3" if demo else "options.sqlite3")
     with database(db_path) as db:
@@ -94,14 +153,13 @@ def run(args) -> Path | None:
             print(f"Report: {path}")
             return path
         elif args.command == "collect":
-            get = authenticated_get()
-            universe = None
-            for i in range(args.count):
-                if i:
-                    time.sleep(args.interval_seconds or settings.collection.interval_seconds)
-                raw = fetch_capture(get, settings.collection, args.expiry, universe)
+            for raw in iter_captures(
+                settings.collection,
+                count=args.count,
+                interval_seconds=args.interval_seconds,
+                expiry=args.expiry,
+            ):
                 save_market(db, raw, args.data_dir, settings.quality)
-                universe = raw["universe"]
         elif args.command == "import-capture":
             save_market(db, json.loads(args.path.read_text()), args.data_dir, settings.quality)
         elif args.command == "value":

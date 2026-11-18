@@ -1,7 +1,7 @@
 import math
 import unittest
 
-from options_lab.pricing import black_scholes
+from modules.models.black_scholes import black_scholes
 
 
 class BlackScholesTests(unittest.TestCase):

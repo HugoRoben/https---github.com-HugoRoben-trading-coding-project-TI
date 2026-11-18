@@ -24,9 +24,9 @@ Collect snapshots at a configurable modest interval, such as 15 minutes, during 
 
 Use deterministic, explicitly synthetic multi-timestamp fixtures to validate the simulator immediately. Separately accumulate real snapshots for future evaluation. A current options chain is not a historical backtest, and a few days of observations will not establish a reliable trading edge.
 
-## Proposed folder structure
+## Original folder proposal
 
-Create these files as their corresponding work begins; do not add empty future subsystems.
+The sketch below records the original proposal. For the implemented folders and the path through the Alpaca collector, see [Where the code lives](../README.md#where-the-code-lives).
 
 ```text
 trading project/
@@ -69,7 +69,7 @@ trading project/
     └── ROADMAP.md                 # This document; created
 ```
 
-Keep these as modules initially. Split ingestion, storage, strategies, or simulation into packages when a second implementation or growing complexity justifies it. Add server/, llm/, native/, deployment files, and database migrations in their later phases.
+Server, LLM, native code, deployment files and database migrations are planned for later phases.
 
 ## Initial tooling
 

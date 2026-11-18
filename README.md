@@ -1,19 +1,38 @@
 # Local options research lab
 
-Collect option quotes, inspect them in SQLite, and value them with a European Black–Scholes–Merton baseline. A separate synthetic dataset exercises the trading rule and cash accounting. Both workflows run on this Mac.
+Collect option quotes, inspect them in SQLite, and value them with a European Black–Scholes–Merton baseline. A separate synthetic dataset exercises the trading rule and cash accounting. Both workflows run locally.
+
+## Where the code lives
+
+| Folder | Contents |
+| --- | --- |
+| [options_lab/](options_lab/) | The application entry point for the CLI and notebook, shared settings, contract and quote types, and validation. The old collector, model, and storage import paths forward to their implementations under `modules/`. |
+| [modules/alpaca/](modules/alpaca/) | `retrieval.py` runs a collection session. `client.py` handles authentication, endpoints and request errors. `normalization.py` converts provider fields into contracts and quotes. |
+| [modules/euronext/](modules/euronext/) | Retrieves delayed Amsterdam executions, identifies ASML options using ESMA reference data and pairs each option print with an earlier share trade. |
+| [modules/models/](modules/models/) | `black_scholes.py` prices options, `strategies.py` defines the entry rule and fill costs, and `simulation.py` replays the trades. |
+| [modules/storage_reporting/](modules/storage_reporting/) | `raw_captures.py` archives original JSON. `database.py` reads and writes SQLite using `schema.sql`. `status.py` supplies the notebook's SQL table previews. `reporting.py` builds valuations and simulated trade reports. |
+
+To trace a collection, start with `iter_captures()` in [retrieval.py](modules/alpaca/retrieval.py). Each call to `fetch_capture()` gets the latest stock quote. On the first capture, `select_universe()` uses the midpoint to choose nearby strikes from the contract catalog. Each capture then fetches option quotes for that same set of symbols. The underlying, expiry window, strike band and interval are in [default.toml](config/default.toml).
+
+The notebook calls the same [CLI](options_lab/cli.py) as the terminal. Its `save_market()` function normalizes each capture, archives the original response, and writes the snapshot and quality flags to SQLite. Earlier scripts can still import the collector, pricing, simulation, storage and reporting functions from their original `options_lab` modules.
 
 ## Run the offline example
 
-From Terminal, open the project and activate its Python environment.
+From the root of a fresh clone, create a virtual environment with Python 3.11 or newer.
 
 ```sh
-cd "$HOME/Documents/trading project"
+python3 -m venv .venv
+```
+
+In a new terminal session, activate the environment and run the offline example.
+
+```sh
 source .venv/bin/activate
 python -m options_lab init-db
 python -m options_lab demo
 ```
 
-The environment has been created on this Mac. On a fresh checkout, run `python3 -m venv .venv` before activation, using Python 3.11 or newer. The CLI and its offline tests use the standard library. The base environment in `uv.lock` has no third-party dependencies. Notebook packages are listed in `notebooks/requirements.txt`.
+The CLI and its offline tests use the standard library. `init-db` creates the market database. `demo` creates the synthetic database and replay report. Notebook packages are listed in `notebooks/requirements.txt`.
 
 | Path | What you can inspect |
 | --- | --- |
@@ -28,11 +47,28 @@ The demo prints the exact report directory. With the default settings, the signa
 
 ## Run the notebook in VS Code
 
-Open [notebooks/project_status.ipynb](notebooks/project_status.ipynb), choose the project's `.venv` Python environment under **Select Kernel**, and click **Run All**. The notebook dependencies are installed on this Mac. On a fresh checkout, activate the environment and run `python -m pip install -r notebooks/requirements.txt`.
+On a fresh checkout, activate the environment and run `python -m pip install -r notebooks/requirements.txt`. Open [notebooks/project_status.ipynb](notebooks/project_status.ipynb), choose the project's `.venv` under **Select Kernel**, and click **Run All**.
 
 The first cell controls collection and the number of rows to display. With `COLLECT_MARKET = True`, each run reads the Alpaca credentials from the project’s `.env` and requests one snapshot. Use `False` for offline inspection. If the request fails, the notebook shows the collection status and the captures already on disk.
 
-The status table shows capture counts, quote timestamps and flagged observations for each database. Below it are the newest completed trades in the current synthetic replay, previews of all three SQLite tables, and per-share valuations from saved reports. The default fixture has one completed trade. Increasing `ROWS` shows additional trades when the replay contains them. You can explore the displayed data in the `recent_trades`, `snapshots`, `contracts`, `quotes` and `valuations` DataFrames. Before committing an executed notebook, use **Clear All Outputs** and save it to keep captured market observations out of Git.
+The status table shows capture counts, quote timestamps and flagged observations for each database. Below it are the newest completed trades in the current synthetic replay, previews of all three SQLite tables, and per-share valuations from saved reports. The default fixture has one completed trade. Increasing `ROWS` shows additional trades when the replay contains them. You can explore the displayed data in the `recent_trades`, `snapshots`, `contracts`, `quotes` and `valuations` DataFrames.
+
+To keep a run with its tables visible, save a copy as `notebooks/project_status.local.ipynb`. Git ignores `*.local.ipynb`. Before staging changes to the tracked notebook, use **Clear All Outputs** and save it.
+
+## Test ASML during the Dutch trading day
+
+Open [asml_amsterdam.ipynb](notebooks/asml_amsterdam.ipynb), select the project's `.venv` kernel, and choose **Run All**. This profile uses public market data and requires no API key. On regular trading days the ASL order book trades continuously from **09:01 to 17:30 Amsterdam time**. Euronext publishes its free trade files with about a 15-minute delay. **10:00–12:00 Amsterdam time** is a convenient test window before the U.S. regular session. [ASL contract specifications](https://live.euronext.com/en/product/stock-options/ASL-DAMS/contract-specification) · [Euronext delayed data](https://www.euronext.com/en/data/pricing-specs-agreements/mifid-ii-compliant-data)
+
+The [Amsterdam settings](config/asml_amsterdam.toml) select ASML shares (ISIN `NL0010273215`) and the standard `ASL` option class. The default capture covers the last available hour of today's trades and expiries from 0 to 60 calendar days ahead. The same profile works from the terminal.
+
+```sh
+python -m options_lab --config config/asml_amsterdam.toml collect
+python -m options_lab --config config/asml_amsterdam.toml value
+```
+
+The notebook shows capture counts, recent exchange executions in EUR, and a European Black–Scholes–Merton scenario for each eligible trade. ASL options allow early exercise. Each scenario uses the latest retained ASML share execution already published by the time the option traded. The report leaves the model value blank when that share price is missing or too old. Euronext's public files contain post-trade prices. Spread analysis and the fill simulator require bid/ask data. [Euronext trade files](https://marketdata.euronext.com/data-reporting-service/trades-file) · [ESMA instrument register](https://registers.esma.europa.eu/publication/searchRegister?core=esma_registers_firds)
+
+Each retrieval creates a window in `data/amsterdam.sqlite3`. Its raw inputs are archived under `data/raw/euronext/`, and `value` writes `trades.csv` and `manifest.json` under `reports/amsterdam-…/`. Reports count each execution once within the selected window and exclude known cancellations and amendments. Overlapping windows can contain the same execution. Set `REFRESH = False` in the notebook to inspect the latest saved window offline.
 
 ## Inspect SQLite
 
@@ -114,12 +150,11 @@ python -m unittest discover -s tests -v
 
 Tests cover pricing references and parity, duplicate imports and rollback, stale and missing quotes, new observations after a signal, capital constraints, hand-calculated P&L, and two collector intervals using mocked provider replies.
 
-To create the local Git history from the project root, run these commands in your terminal. The file list selects project sources, the lockfile and the synthetic fixture.
+The GitHub repository uses `main`. A clone already has its `origin` remote. To check the upstream branch and review the staged changes, run the following from the project root.
 
 ```sh
-git init -b main
-git add .gitignore .env.example AGENTS.md README.md pyproject.toml uv.lock config docs notebooks options_lab tests
-git commit -m "Start the local options research pipeline"
+git status --short --branch
+git diff --cached --stat
 ```
 
 The next milestone is two successful external captures, a check of their timestamps and flags, and a valuation pinned to one capture. The [roadmap](docs/ROADMAP.md) and [architecture notes](docs/ARCHITECTURE.md) describe later stages.

@@ -3,10 +3,10 @@ from datetime import timedelta
 from decimal import Decimal
 import unittest
 
+from modules.models.simulation import replay
+from modules.storage_reporting.reporting import closed_trade_rows
 from options_lab.config import load_settings
 from options_lab.fixtures import fixture_inputs
-from options_lab.reporting import closed_trade_rows
-from options_lab.simulation import replay
 
 
 class ReplayTests(unittest.TestCase):

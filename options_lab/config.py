@@ -1,8 +1,9 @@
-"""Run inputs. Financial amounts in the TOML are in USD or USD per share."""
+"""Settings for U.S. quote collection and Amsterdam trade collection."""
 
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
+import re
 import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -48,11 +49,57 @@ class Settings:
     simulation: Simulation
 
 
-def load_settings(path: Path = ROOT / "config/default.toml") -> Settings:
+@dataclass(frozen=True)
+class AmsterdamMarket:
+    underlying: str
+    share_isin: str
+    option_class: str
+    window: str
+    min_days_to_expiry: int
+    max_days_to_expiry: int
+    interval_seconds: int
+    max_spot_age_seconds: int
+
+
+@dataclass(frozen=True)
+class AmsterdamSettings:
+    euronext: AmsterdamMarket
+    model: Model
+
+
+def load_settings(path: Path = ROOT / "config/default.toml") -> Settings | AmsterdamSettings:
     with path.open("rb") as file:
         data = tomllib.load(file)
-    c = Collection(**data["collection"])
     m = Model(**data["model"])
+    if "euronext" in data:
+        e = AmsterdamMarket(**data["euronext"])
+        if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{9}[0-9]", e.share_isin) or not re.fullmatch(
+            r"[A-Z0-9]+", e.option_class
+        ):
+            raise ValueError("expected a share ISIN and an Amsterdam option class")
+        if e.window not in {"LAST_15_MINUTES", "LAST_HOUR"}:
+            raise ValueError("choose LAST_15_MINUTES or LAST_HOUR for the Amsterdam tape")
+        if not all(
+            type(n) is int
+            for n in (
+                e.min_days_to_expiry,
+                e.max_days_to_expiry,
+                e.interval_seconds,
+                e.max_spot_age_seconds,
+            )
+        ):
+            raise ValueError("Amsterdam day and second settings must be whole numbers")
+        if not (0 <= e.min_days_to_expiry <= e.max_days_to_expiry <= 366):
+            raise ValueError("choose an Amsterdam expiry window between 0 and 366 days")
+        if min(e.interval_seconds, e.max_spot_age_seconds) <= 0:
+            raise ValueError("collection interval and stock age limit must be positive")
+        if (
+            not all(isfinite(v) for v in (m.rate, m.dividend_yield, m.volatility))
+            or m.volatility < 0
+        ):
+            raise ValueError("expected finite model inputs and nonnegative volatility")
+        return AmsterdamSettings(e, m)
+    c = Collection(**data["collection"])
     q = Quality(**data["quality"])
     s = Simulation(**data["simulation"])
     if not c.underlying.isalpha() or not c.underlying.isupper():

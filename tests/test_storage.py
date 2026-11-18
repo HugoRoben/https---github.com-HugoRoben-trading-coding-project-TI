@@ -5,10 +5,10 @@ import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
 
+from modules.storage_reporting.database import database, read_snapshot, save_snapshot
 from options_lab.config import load_settings
 from options_lab.domain import parse_time
 from options_lab.fixtures import fixture_inputs
-from options_lab.storage import database, read_snapshot, save_snapshot
 from options_lab.validation import quality_flags
 
 

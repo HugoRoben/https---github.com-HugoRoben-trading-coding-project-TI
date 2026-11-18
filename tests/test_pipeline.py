@@ -15,18 +15,13 @@ from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlsplit
 
+from modules.alpaca.client import CONTRACTS_URL, AlpacaError, contract_catalog_url
+from modules.alpaca.normalization import normalize
+from modules.alpaca.retrieval import fetch_capture, select_universe
+from modules.storage_reporting.database import database
 from options_lab.cli import main
 from options_lab.config import load_settings
 from options_lab.domain import iso
-from options_lab.ingestion import (
-    AlpacaError,
-    CONTRACTS_URL,
-    contract_catalog_url,
-    fetch_capture,
-    normalize,
-    select_universe,
-)
-from options_lab.storage import database
 from options_lab.validation import quality_flags
 
 
@@ -99,7 +94,7 @@ class PipelineTests(unittest.TestCase):
             with (
                 self.subTest(key=key, override=override),
                 patch.dict(os.environ, {"APCA_API_KEY_ID": key, "APCA_API_BASE_URL": override}),
-                patch("options_lab.ingestion.urlopen", side_effect=respond),
+                patch("modules.alpaca.client.urlopen", side_effect=respond),
             ):
                 self.queries.clear()
                 self.assertEqual(self.cli("collect", "--expiry", "2099-02-20"), 0)
@@ -130,7 +125,7 @@ class PipelineTests(unittest.TestCase):
         ]:
             with (
                 self.subTest(expected=expected),
-                patch("options_lab.ingestion.urlopen", side_effect=error),
+                patch("modules.alpaca.client.urlopen", side_effect=error),
             ):
                 self.output.seek(0)
                 self.output.truncate()
@@ -143,8 +138,8 @@ class PipelineTests(unittest.TestCase):
 
     def test_two_intervals_fixed_universe_raw_reimport_and_pinned_report(self):
         with (
-            patch("options_lab.cli.authenticated_get", return_value=self.mock_get),
-            patch("options_lab.cli.time.sleep") as pause,
+            patch("modules.alpaca.retrieval.authenticated_get", return_value=self.mock_get),
+            patch("modules.alpaca.retrieval.sleep") as pause,
         ):
             self.assertEqual(
                 self.cli(
@@ -172,6 +167,18 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(put["model_per_share"])
         self.assertEqual(put["model_minus_ask"], "")
 
+    def test_interrupted_session_keeps_its_completed_capture(self):
+        with (
+            patch("modules.alpaca.retrieval.authenticated_get", return_value=self.mock_get),
+            patch("modules.alpaca.retrieval.sleep", side_effect=KeyboardInterrupt),
+        ):
+            self.assertEqual(self.cli("collect", "--count", "2"), 130)
+
+        with database(self.data / "options.sqlite3") as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0], 1)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM quotes").fetchone()[0], 2)
+        self.assertEqual(len(list((self.data / "raw").glob("*.json"))), 1)
+
     def test_missing_multiplier_does_not_use_deliverable_size(self):
         config = load_settings()
         raw = fetch_capture(self.mock_get, config.collection, date(2099, 2, 20))
@@ -189,7 +196,7 @@ class PipelineTests(unittest.TestCase):
                 raise ValueError("second page failed")
             return self.mock_get(url, params)
 
-        with patch("options_lab.cli.authenticated_get", return_value=broken):
+        with patch("modules.alpaca.retrieval.authenticated_get", return_value=broken):
             self.assertEqual(self.cli("collect", "--expiry", "2099-02-20"), 1)
         with database(self.data / "options.sqlite3") as db:
             self.assertEqual(db.execute("SELECT count(*) FROM snapshots").fetchone()[0], 0)

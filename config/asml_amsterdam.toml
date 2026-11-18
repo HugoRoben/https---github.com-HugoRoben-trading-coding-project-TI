@@ -1,0 +1,17 @@
+# Amsterdam executions published by Euronext with a 15-minute delay.
+# ASL is the standard ASML option class. The cash share trades on XAMS.
+[euronext]
+underlying = "ASML"
+share_isin = "NL0010273215"
+option_class = "ASL"
+window = "LAST_HOUR"  # LAST_15_MINUTES or LAST_HOUR
+min_days_to_expiry = 0
+max_days_to_expiry = 60
+interval_seconds = 900
+max_spot_age_seconds = 300
+
+[model]
+# Illustrative annual inputs in decimals. Model prices are EUR per share.
+rate = 0.02
+dividend_yield = 0.005
+volatility = 0.25

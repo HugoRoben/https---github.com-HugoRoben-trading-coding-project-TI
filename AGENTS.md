@@ -10,6 +10,7 @@ Deliver a working local pipeline first. The intended later deployment splits res
 
 ## Working approach
 
+- Obtain the owner's explicit approval for each publication of project code or artifacts. This includes pushing branches or tags, opening pull requests, and publishing releases.
 - Work in small, runnable increments. Keep implementation within the requested milestone; future ideas belong in the roadmap.
 - Make routine implementation decisions autonomously, explain material trade-offs, and ask only when missing information changes scope or correctness.
 - Challenge flawed financial or statistical reasoning directly. State assumptions and uncertainty rather than presenting model output as fact.
