@@ -1,4 +1,11 @@
-"""Compatibility imports for the original Alpaca adapter."""
+"""Expose the original import paths for Alpaca collection and raw archiving.
+
+Earlier callers can import the client, endpoint constants, strike selection, response
+normalization and archive helper from this module. The implementations live in
+modules.alpaca and modules.storage_reporting.raw_captures. The objects are re-exported
+directly, so their signatures, exceptions and docstrings match those at the implementation
+paths.
+"""
 
 from modules.alpaca.client import (
     CONTRACTS_PATH,

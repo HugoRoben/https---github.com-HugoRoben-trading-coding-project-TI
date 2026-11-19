@@ -1,17 +1,25 @@
 # Amsterdam executions published by Euronext with a 15-minute delay.
 # ASL is the standard ASML option class. The cash share trades on XAMS.
+# The CLI and ASML notebook use this profile to join EUR option prints to the cash
+# share by ISIN and to read the contract terms from ESMA. A capture is one rolling window.
 [euronext]
 underlying = "ASML"
 share_isin = "NL0010273215"
 option_class = "ASL"
 window = "LAST_HOUR"  # LAST_15_MINUTES or LAST_HOUR
+# Inclusive calendar days from the Amsterdam trading date. Zero includes same-day expiry.
 min_days_to_expiry = 0
 max_days_to_expiry = 60
+# Polling every 15 minutes means consecutive one-hour windows can share executions.
 interval_seconds = 900
+# Maximum gap from share execution to option execution for a model value, in seconds.
+# Older matches and unmatched option trades remain visible with a valuation status.
 max_spot_age_seconds = 300
 
 [model]
 # Illustrative annual inputs in decimals. Model prices are EUR per share.
+# Rate and dividend yield are continuously compounded. Repricing a saved window with
+# different assumptions produces a separate report using the same observed trades.
 rate = 0.02
 dividend_yield = 0.005
 volatility = 0.25

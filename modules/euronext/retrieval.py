@@ -1,4 +1,10 @@
-"""Read Amsterdam trade files and resolve the traded options through ESMA FIRDS."""
+"""Collect delayed Amsterdam trades and the reference data needed to interpret them.
+
+Euronext's selected equities and derivatives archives identify executions by instrument
+ISIN. ESMA FIRDS supplies strike, expiry, option type and exercise terms. The collector
+narrows the records to the configured share, option class, venue and Amsterdam trading
+date. Its return value preserves native fields for later reconciliation and repricing.
+"""
 
 import csv
 from collections.abc import Collection
@@ -38,6 +44,14 @@ TRADE_FIELDS = {
 
 
 def download(url: str) -> bytes:
+    """Fetch a bounded binary response from an exchange or reference-data URL.
+
+    Send a GET request with the project user agent and a 30-second timeout. Return the body
+    as bytes, or empty bytes for HTTP 204, which the trade-file reader treats as an empty
+    selection. A non-204 empty body or a response above 32,000,000 bytes raises ValueError.
+    HTTP and connection failures are reported with the host and the original exception as
+    their cause.
+    """
     request = Request(url, headers={"User-Agent": "options-lab/0.1 (local market research)"})
     try:
         with urlopen(request, timeout=30) as response:
@@ -56,6 +70,13 @@ def download(url: str) -> bytes:
 
 
 def matches_class(record: dict, market: AmsterdamMarket) -> bool:
+    """Check whether a FIRDS record belongs to the configured Amsterdam option class.
+
+    Match the class as a whole field in the exchange short name. Also require the XEUE
+    derivatives venue, the configured underlying share ISIN, a call or put type, and EUR as
+    both notional and strike currency. These fields distinguish ASL from other option
+    classes on the same share. The caller applies expiry bounds separately.
+    """
     # The exchange short name contains the class as a separate field, e.g. ASL.
     name = record["gnr_short_name"].split()
     return (
@@ -72,6 +93,16 @@ def matches_class(record: dict, market: AmsterdamMarket) -> bool:
 
 
 def listed_options(market: AmsterdamMarket, start: date, end: date, get) -> dict:
+    """Retrieve listed option terms indexed by ISIN for an inclusive expiry range.
+
+    start and end are Amsterdam calendar dates. Query the months they cover using the
+    configured share ISIN, venue and class, then check the returned terms against the exact
+    date range and class. The injected get function accepts a URL and returns bytes.
+
+    Follow pagination until the advertised result count is reached. Identical records for
+    an ISIN can coalesce. Conflicting records, an unexpected page offset or a prematurely
+    empty page raise ValueError. A completed query may return an empty dictionary.
+    """
     # Each ESMA short name includes the expiry as YYYYMMDD. Narrow the search by
     # month and enforce the exact date, product class, venue and currency on each result.
     months = sorted(
@@ -110,6 +141,16 @@ def listed_options(market: AmsterdamMarket, start: date, end: date, get) -> dict
 def publications(
     content: bytes, filename: str, venue: str, isins: Collection[str], trading_day: date
 ) -> list:
+    """Extract native trade rows for a venue, set of ISINs and Amsterdam trading day.
+
+    content is the downloaded ZIP body and filename identifies the CSV member inside it.
+    Read the UTF-8 header, allowing for a byte-order mark and an exchange preamble. Verify
+    the required columns and cap the uncompressed member at 128,000,000 bytes.
+
+    Return matching CSV rows as dictionaries of strings, preserving publication times and
+    modification indicators for later processing. An empty body gives an empty list. An
+    unreadable ZIP, missing member or unrecognized header raises ValueError.
+    """
     if not content:  # The exchange returns HTTP 204 for an empty selection.
         return []
     try:
@@ -141,7 +182,18 @@ def publications(
 def fetch_trades(
     market: AmsterdamMarket, expiry: date | None = None, *, get=download, now=None
 ) -> dict:
-    """Capture the published executions for this Amsterdam trading date and option class."""
+    """Assemble a delayed option and share trade window for the configured Amsterdam class.
+
+    Determine the trading date from the timezone-aware now callable, using the current UTC
+    clock by default. Resolve contract terms for the configured day range or an exact
+    expiry, then download derivatives and cash-share publications through get. A past
+    expiry or an explicitly requested date with no listed contract raises ValueError.
+
+    Return a dictionary with the retrieval time, date range, source URLs, count of listed
+    contracts, native terms for the options observed, and the filtered rows from both
+    tapes. A valid window may contain zero executions. The function returns the capture in
+    memory for archiving or inspection.
+    """
     now = now or (lambda: datetime.now(UTC))
     today = now().astimezone(AMSTERDAM).date()
     start = expiry or (today + timedelta(days=market.min_days_to_expiry))

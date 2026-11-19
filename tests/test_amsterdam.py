@@ -1,4 +1,10 @@
-"""Invented Amsterdam reports and reference records exercise the public-data adapter offline."""
+"""Exercise the Amsterdam capture-to-report pipeline with invented exchange publications.
+
+Construct FIRDS-style contract records and zipped CSV trade files in memory so pagination,
+venue checks, cancellations and share matching can be tested offline. The integration case
+runs CLI collection, raw reimport and EUR report generation against temporary files and
+checks what survives at each stage.
+"""
 
 from contextlib import redirect_stdout
 import csv
@@ -25,6 +31,13 @@ CALL, PUT = "TEST-CALL", "TEST-PUT"
 
 
 def terms(isin, side, option_class="ASL"):
+    """Build an invented ESMA option record for the Amsterdam collector tests.
+
+    isin identifies the series and side is the exchange short-name marker C or P.
+    option_class defaults to ASL and can be changed to exercise rejection of a related
+    class. Return a FIRDS-shaped dictionary with EUR strike, multiplier, exercise style and
+    a June expiry whose termination timestamp exercises Amsterdam summer time.
+    """
     return dict(
         isin=isin,
         mic="XEUE",
@@ -42,6 +55,13 @@ def terms(isin, side, option_class="ASL"):
 
 
 def execution(isin, tx, at, price, *, published=None, flag="-"):
+    """Build a single invented Euronext publication on the fixed test date.
+
+    isin selects the cash or derivatives venue, tx is the exchange trade ID, at is a UTC
+    time of day, and price is serialized as a CSV-style string. By default publication
+    occurs at the execution time. Override published or flag to model a late report or
+    cancellation for the same trade ID.
+    """
     return dict(
         TradingDateTime=f"2026-06-10T{at}Z",
         PublicationDateTime=f"2026-06-10T{published or at}Z",
@@ -57,6 +77,13 @@ def execution(isin, tx, at, price, *, published=None, flag="-"):
 
 
 def zipped(filename, rows):
+    """Encode synthetic trade rows in the ZIP and CSV format consumed by the adapter.
+
+    filename names the member expected for either equities or derivatives. Write a
+    preamble, the required column names and the supplied rows, then return the entire
+    archive as bytes. Empty rows still produce a well-formed exchange-style file, allowing
+    tests to distinguish an empty tape from damaged input.
+    """
     csv_text = StringIO()
     csv_text.write("(c) Euronext test data\n")
     writer = csv.DictWriter(csv_text, fieldnames=sorted(TRADE_FIELDS))
@@ -69,7 +96,23 @@ def zipped(filename, rows):
 
 
 class AmsterdamTests(unittest.TestCase):
+    """Check contract identification, trade-clock matching and Amsterdam report persistence.
+
+    The fixture places duplicated, cancelled, stale and out-of-class observations alongside
+    valid executions. A fixed clock makes the relationships between execution, publication,
+    capture and expiry reproducible. Temporary databases and an in-memory download
+    replacement exercise the normal collection entry points.
+    """
+
     def setUp(self):
+        """Prepare fresh contract and trade fixtures for a single Amsterdam test.
+
+        Load the project profile and construct option and stock publications for the same
+        day. The stock tape includes a print published after the candidate option trade,
+        while the derivative tape includes repeated IDs, a cancellation and a different
+        class. Reset the pagination log so each test can inspect its own reference
+        requests.
+        """
         self.settings = load_settings(PROFILE)
         self.options = [
             execution(CALL, "opt", "09:00:00", 2.20),
@@ -88,6 +131,13 @@ class AmsterdamTests(unittest.TestCase):
         self.pages = []
 
     def get(self, url):
+        """Serve a manufactured response for one public provider URL.
+
+        For a FIRDS URL, check the underlying filter, record the requested offset and
+        return the matching page of JSON bytes. For an equities or derivatives download,
+        encode that test's current rows as the appropriate ZIP member. Unexpected
+        derivatives URL shapes fail the test so endpoint construction is also exercised.
+        """
         if urlsplit(url).hostname == "registers.esma.europa.eu":
             params = parse_qs(urlsplit(url).query)
             offset = int(params["start"][0])
@@ -105,9 +155,23 @@ class AmsterdamTests(unittest.TestCase):
         return zipped("Trades_EquityIndexDerivatives.csv", self.options)
 
     def capture(self):
+        """Collect an in-memory Amsterdam window at the fixed test instant.
+
+        Pass the actual profile, the test's URL responder and a frozen UTC clock through
+        fetch_trades. Return the raw capture exactly as the adapter constructs it, so
+        downstream assertions can inspect the selection, trade rows and original terms
+        without a live network dependency.
+        """
         return fetch_trades(self.settings.euronext, get=self.get, now=lambda: NOW)
 
     def test_native_contracts_publication_times_and_cancellation(self):
+        """Check which contracts, executions and share prices survive reconciliation.
+
+        Require both reference pages, exclude the other class and collapse repeated or
+        cancelled prints. The matched share price must have been published by the option
+        execution, and the earliest print must retain an empty share price. Also check the
+        June expiry cutoff in UTC to catch a local-time conversion error.
+        """
         raw = self.capture()
         self.assertEqual(self.pages, [0, 1])
         self.assertEqual((raw["listed_contracts"], set(raw["contracts"])), (2, {CALL, PUT}))
@@ -119,10 +183,25 @@ class AmsterdamTests(unittest.TestCase):
         self.assertIsNone(rows["early"]["stock_eur"])
 
     def test_cli_collection_raw_reimport_and_pinned_eur_report(self):
+        """Verify one Amsterdam window through collection, reimport, SQL and CSV valuation.
+
+        Run the real dispatcher against temporary directories with the retrieval call
+        supplied by the fixture. Check that reimport preserves the window and row counts.
+        Pin the report to the archive digest and inspect the model statuses for usable,
+        stale and missing share prices. The latest-window command must resolve to the same
+        EUR report.
+        """
         with TemporaryDirectory() as tmp, redirect_stdout(StringIO()):
             root = Path(tmp)
 
             def command(*cmd):
+                """Run the specified CLI tokens against this test's isolated Amsterdam paths.
+
+                Prefix cmd with the temporary data and report roots and the real ASML
+                profile, then return the dispatcher's result. Sharing this setup makes
+                calls to collect, import-capture and value operate on the same temporary
+                archive and database.
+                """
                 args = parser().parse_args(
                     [
                         "--data-dir",
@@ -159,6 +238,12 @@ class AmsterdamTests(unittest.TestCase):
             self.assertEqual(command("value"), target)
 
     def test_empty_tape_and_exact_expiry(self):
+        """Distinguish a valid empty trade window from an unlisted requested expiry.
+
+        An option tape with a valid header and no rows must normalize to an empty trade
+        list. A separate request pins an expiry outside the manufactured contract listing
+        and must raise the profile-specific no-listed-options error.
+        """
         self.options = []
         raw = self.capture()
         self.assertEqual(trade_rows(raw, self.settings.euronext), [])
@@ -166,6 +251,13 @@ class AmsterdamTests(unittest.TestCase):
             fetch_trades(self.settings.euronext, date(2026, 6, 22), get=self.get, now=lambda: NOW)
 
     def test_wrong_provider_or_malformed_download_is_rejected(self):
+        """Reject captures for another underlying and unreadable exchange downloads.
+
+        Replace the raw capture's share identifier and require the profile check to fail.
+        Then send an HTML error body in place of the trade ZIP while keeping the reference
+        replies valid. The download parser must surface the malformed archive before
+        observations can reach storage.
+        """
         raw = self.capture()
         raw["share_isin"] = "OTHER"
         with self.assertRaisesRegex(ValueError, "does not match"):

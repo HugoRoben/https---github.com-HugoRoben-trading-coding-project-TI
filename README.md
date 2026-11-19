@@ -1,8 +1,10 @@
 # Local options research lab
 
-Collect option quotes, inspect them in SQLite, and value them with a European Black–Scholes–Merton baseline. A separate synthetic dataset exercises the trading rule and cash accounting. Both workflows run locally.
+Collect U.S. option quotes from Alpaca or Amsterdam ASML option executions from Euronext, inspect them in SQLite, and value them with a European Black–Scholes–Merton baseline. A separate synthetic dataset exercises the trading rule and cash accounting. All three workflows run locally.
 
 ## Where the code lives
+
+Each Python module, class and function has a docstring. In VS Code, hover over a function name to read its inputs, units, return values and relevant timing or storage assumptions. In a notebook, for example, run `from modules.euronext.observations import trade_rows` and then `help(trade_rows)` to see how an option execution is matched to a share trade.
 
 | Folder | Contents |
 | --- | --- |
@@ -10,7 +12,7 @@ Collect option quotes, inspect them in SQLite, and value them with a European Bl
 | [modules/alpaca/](modules/alpaca/) | `retrieval.py` runs a collection session. `client.py` handles authentication, endpoints and request errors. `normalization.py` converts provider fields into contracts and quotes. |
 | [modules/euronext/](modules/euronext/) | Retrieves delayed Amsterdam executions, identifies ASML options using ESMA reference data and pairs each option print with an earlier share trade. |
 | [modules/models/](modules/models/) | `black_scholes.py` prices options, `strategies.py` defines the entry rule and fill costs, and `simulation.py` replays the trades. |
-| [modules/storage_reporting/](modules/storage_reporting/) | `raw_captures.py` archives original JSON. `database.py` reads and writes SQLite using `schema.sql`. `status.py` supplies the notebook's SQL table previews. `reporting.py` builds valuations and simulated trade reports. |
+| [modules/storage_reporting/](modules/storage_reporting/) | `raw_captures.py` archives provider JSON. `database.py` stores quote snapshots, and `amsterdam.py` stores and values Dutch trade windows. `status.py` exposes read-only table previews. `reporting.py` builds USD valuations and simulated trade reports. |
 
 To trace a collection, start with `iter_captures()` in [retrieval.py](modules/alpaca/retrieval.py). Each call to `fetch_capture()` gets the latest stock quote. On the first capture, `select_universe()` uses the midpoint to choose nearby strikes from the contract catalog. Each capture then fetches option quotes for that same set of symbols. The underlying, expiry window, strike band and interval are in [default.toml](config/default.toml).
 

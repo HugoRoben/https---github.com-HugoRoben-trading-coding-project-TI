@@ -1,3 +1,6 @@
+# Project metadata for the local options research CLI, which runs from the repository root.
+# Runtime dependencies for the CLI are empty. The optional Jupyter environment has its
+# own requirements file in notebooks/. Ruff uses the minimum supported Python version.
 [project]
 name = "options-lab"
 version = "0.1.0"

@@ -1,4 +1,10 @@
-"""Decode the stock quote, contract metadata, and option quotes in a raw capture."""
+"""Translate an archived Alpaca capture into the records used by pricing and storage.
+
+The underlying observation is the midpoint of the IEX bid and ask. Each selected option
+carries its own indicative quote time and the contract terms returned by the catalog.
+Exchange observation times and the collector's retrieval time remain available
+independently for age and synchronization checks.
+"""
 
 from datetime import UTC, date, datetime, time
 from math import isfinite
@@ -11,6 +17,13 @@ FORMAT = "alpaca-options-v1"
 
 
 def number(value) -> float | None:
+    """Convert an optional provider field to a finite float.
+
+    Return None for a missing value, an empty string, NaN or either infinity. Numeric
+    strings and numbers are converted through float. A malformed nonempty value raises a
+    conversion error. Zero and negative values pass through so the caller can apply the
+    appropriate rule for a price, bid or multiplier.
+    """
     if value in (None, ""):
         return None
     result = float(value)
@@ -18,6 +31,13 @@ def number(value) -> float | None:
 
 
 def stock_midpoint(response: dict) -> float | None:
+    """Compute the underlying price proxy from a latest-stock-quote response.
+
+    Read bp and ap from the nested quote mapping and take their arithmetic mean in USD per
+    share. Return None if either side is absent or nonfinite, the bid is nonpositive, or
+    the bid exceeds the ask. A locked positive quote is usable. The collector requires a
+    usable midpoint for its initial strike selection.
+    """
     quote = response.get("quote") or {}
     bid, ask = number(quote.get("bp")), number(quote.get("ap"))
     if bid is None or ask is None or not 0 < bid <= ask:
@@ -26,7 +46,18 @@ def stock_midpoint(response: dict) -> float | None:
 
 
 def normalize(raw: dict) -> Snapshot:
-    """Convert one raw Alpaca capture into a snapshot of the underlying and its options."""
+    """Build a Snapshot from one raw IEX-stock and indicative-options capture.
+
+    Check the archived format, feed names and underlying symbol. Join every selected option
+    symbol to its archived contract terms. A missing option observation still produces a
+    Quote with empty fields. A provider expiry date becomes an assumed 16:00 New York
+    cutoff converted to UTC. An absent multiplier stays unknown.
+
+    Return a market Snapshot with the original capture ID, retrieval time, stock midpoint
+    and timestamp, and a tuple of option quotes. Invalid feed or symbol combinations raise
+    ValueError. Required structural fields must be present in the archive. No network or
+    database access is needed.
+    """
     if raw["format"] != FORMAT or (raw["option_feed"], raw["underlying_feed"]) != (
         "indicative",
         "iex",

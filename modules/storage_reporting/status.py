@@ -1,4 +1,10 @@
-"""Read-only SQLite views for the status notebook, returned as pandas DataFrames."""
+"""Read consistent SQLite previews for the market and synthetic status tables.
+
+The query set covers capture counts, contract versions, individual quotes and flagged
+observations. Quote ages are measured at retrieval in seconds. Each result carries a
+dataset label so the notebook can display real and synthetic records together while
+preserving their origin. pandas is required for these notebook views.
+"""
 
 from contextlib import closing
 from pathlib import Path
@@ -34,7 +40,16 @@ _QUERIES = {
 
 
 def read_status_tables(data_dir: Path, rows: int) -> dict[str, pd.DataFrame]:
-    """Read a consistent set of counts and previews per database, labelled by dataset."""
+    """Read counts and bounded table previews from both local USD databases.
+
+    data_dir must contain initialized options.sqlite3 and demo.sqlite3 files. Open each in
+    read-only mode and run its queries in a single read transaction. rows must be positive
+    and limits each preview per database. The status counts cover each whole database.
+
+    Return DataFrames under status, snapshots, contracts, quotes and flagged, each with a
+    dataset column. Empty previews retain their column names. A missing database or schema
+    raises a SQLite error. Each database has its own consistent read point.
+    """
     if rows < 1:
         raise ValueError("rows must be positive")
     records = {name: [] for name in _QUERIES}

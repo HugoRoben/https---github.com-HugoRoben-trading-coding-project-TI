@@ -1,5 +1,5 @@
 {
-  "description": "Invented USD prices for one synthetic stock. The replay close is scheduled before the first decision.",
+  "description": "Invented USD prices for one synthetic stock and two European option contracts. Each observation gives the retrieval time, the stock observation time and price, and the quote time, bid and ask per share for each option. One put quote repeats an earlier timestamp to exercise freshness checks. The session close is fixed before the first decision so the replay can test entry and exit timing.",
   "underlying": "DEMO",
   "expiry_at": "2025-02-21T21:00:00Z",
   "session_close": "2025-02-03T16:00:02Z",

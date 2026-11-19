@@ -1,9 +1,16 @@
+# U.S. research profile used by the Alpaca quote collector and the synthetic USD replay.
+# Collection chooses the contracts. Quality settings determine what can be compared or
+# traded in the replay. Model and simulation settings are copied into each report.
 [collection]
 underlying = "AAPL"
+# Inclusive calendar days from the New York date. An explicit CLI expiry overrides this range.
 min_days_to_expiry = 14
 max_days_to_expiry = 28
+# Search within 5% of the first stock midpoint and keep the three nearest distinct strikes
+# at the earliest listed expiry in range. Subsequent captures reuse those contract symbols.
 strike_band_fraction = 0.05
 nearest_strikes = 3
+# Pause between completed captures when collect is asked to take more than one.
 interval_seconds = 900
 
 [model]
@@ -13,10 +20,15 @@ dividend_yield = 0.005
 volatility = 0.25
 
 [quality]
+# Maximum age of each quote at capture, then maximum gap between stock and option times.
+# All limits are seconds. A flagged row is retained in SQLite with its diagnostics.
 max_age_seconds = 300
 max_skew_seconds = 60
 
 [simulation]
+# Cash and fees are USD. The entry buffer and slippage are USD per underlying share.
+# The replay multiplies the slipped price by the observed multiplier and charges a fee
+# on each fill. The holding period begins at entry and can end at the scheduled close.
 initial_cash_usd = 1000.00
 entry_buffer_per_share = 0.25
 fee_per_contract_usd = 0.65

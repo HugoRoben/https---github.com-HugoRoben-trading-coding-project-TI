@@ -1,3 +1,11 @@
+"""Verify synthetic replay chronology, eligibility, cash accounting and trade reporting.
+
+The tests modify individual features of the bundled synthetic session, including available
+capital, quote timestamps, multiplier and exit timing. Expected fills and cash changes are
+checked in decimal USD so signals, entries, realized results and open positions can be
+distinguished.
+"""
+
 from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
@@ -10,16 +18,45 @@ from options_lab.fixtures import fixture_inputs
 
 
 class ReplayTests(unittest.TestCase):
+    """Exercise one-contract trading behavior with controlled changes to the demo session.
+
+    Each case starts with the same fixture and default settings. Selected changes force
+    entry cancellation, early exit, missing closing marks or different contract economics.
+    Assertions address both the chronological event history and the resulting portfolio
+    summary.
+    """
+
     def setUp(self):
+        """Load fresh synthetic observations and default settings for one replay case.
+
+        Keep the planned session close and the list of Snapshot objects from
+        fixture_inputs. Discard the input hashes because these tests call replay directly
+        in memory. Each case can reorder or replace its frames without changing the bundled
+        fixture.
+        """
         self.close, inputs = fixture_inputs()
         self.frames = [frame for frame, _ in inputs]
         self.settings = load_settings()
 
     def run_replay(self, **changes):
+        """Run the fixture replay with optional overrides to the simulation settings.
+
+        changes names fields of the Simulation dataclass such as initial_cash_usd or
+        hold_minutes. Make a replaced copy of the rule set and enclosing settings, run
+        against the test's current frames and close, and return the complete replay result
+        for assertions.
+        """
         rules = replace(self.settings.simulation, **changes)
         return replay(self.frames, self.close, replace(self.settings, simulation=rules))
 
     def test_roundtrip_matches_hand_calculation_and_chronology(self):
+        """Check a complete trade against hand-calculated cash movements and P&L.
+
+        Reverse the input frames to exercise chronological sorting. Require distinct
+        signal, buy and sell captures, then compare both signed cash changes with slipped
+        per-share prices times the multiplier and the fees. Check realized P&L, final
+        equity and a flat closing position.
+        """
         self.frames.reverse()
         result = self.run_replay()
         signal, buy, sell = result["events"]
@@ -35,12 +72,24 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(result["position_status"], "flat")
 
     def test_capital_rechecked_at_fill(self):
+        """Exercise affordability both at signal selection and again on the later fill.
+
+        A starting balance of USD 155 admits the initial signal but cannot cover the next
+        eligible ask and fee, so the ledger must show a cancellation. A USD 50 starting
+        balance must produce no signal at all.
+        """
         events = self.run_replay(initial_cash_usd=155)["events"]
         self.assertEqual([e["action"] for e in events], ["signal", "cancel"])
         self.assertEqual(events[-1]["reason"], "insufficient_cash_at_fill")
         self.assertEqual(self.run_replay(initial_cash_usd=50)["events"], [])
 
     def test_trade_report_pairs_fills_and_omits_unclosed_positions(self):
+        """Check completed round trips in a ledger containing non-fill events and an open buy.
+
+        Combine a real fixture round trip with an invented losing trade and a final
+        unmatched buy. Verify summed fees, net P&L and the second trade's entry metadata. A
+        signal and a single buy on their own must produce no completed-trade row.
+        """
         signal, buy, sell = self.run_replay()["events"]
         later_buy = {**buy, "at": "2025-02-04T15:15:00Z", "price_per_share": "2.30"}
         later_sell = {**sell, "at": "2025-02-04T15:45:00Z", "trade_pnl_usd": "-22.30"}
@@ -54,6 +103,13 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(list(closed_trade_rows([signal, buy])), [])
 
     def test_actual_multiplier(self):
+        """Check that changing the observed contract multiplier changes realized P&L.
+
+        Replace every fixture contract's multiplier with 10 while keeping the same quotes
+        and fees. The resulting net realized USD 3.50 exercises the conversion from
+        per-share price to contract cash and catches an implicit assumption of 100 shares
+        per contract.
+        """
         self.frames = [
             replace(
                 s,
@@ -66,6 +122,12 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(Decimal(self.run_replay()["realized_pnl_usd"]), Decimal("3.50"))
 
     def test_no_fill_on_recaptured_pre_signal_quote_even_if_fresh(self):
+        """Reject a new capture whose option quote predates the pending signal.
+
+        Insert a later retrieval of the original quote between the signal and the next
+        genuine update. Its quote age still passes the usual freshness checks. Require the
+        buy to use the subsequent frame with an actually newer option timestamp.
+        """
         first, second = self.frames[:2]
         same = replace(
             first, capture_id="recapture", retrieved_at=first.retrieved_at + timedelta(seconds=2)
@@ -75,6 +137,13 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(buy["capture_id"], second.capture_id)
 
     def test_scheduled_close_and_missing_exit(self):
+        """Exercise an early scheduled exit and unavailable closing valuations.
+
+        Extend the holding period beyond the planned close and check that a usable closing
+        bid yields a scheduled-close sale. Remove that bid and then the closing frame
+        itself. The remaining open position must be unpriced, with unavailable equity and
+        unrealized P&L in the missing-bid case.
+        """
         result = self.run_replay(hold_minutes=90)
         self.assertEqual(result["events"][-1]["reason"], "scheduled_close")
         last = self.frames[-1]
@@ -88,6 +157,13 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(self.run_replay(hold_minutes=90)["position_status"], "open_unpriced")
 
     def test_no_entry_with_planned_exit_at_or_after_expiry(self):
+        """Reject a pending entry whose earliest planned exit reaches contract expiry.
+
+        Move expiry close to the signal and raise spot so that the call still satisfies the
+        entry-price rule. Require an expiry-related cancellation and verify the ledger
+        contains no buy. This isolates the exit timing constraint from affordability or
+        model thresholds.
+        """
         expiry = self.frames[2].retrieved_at
         self.frames = [
             replace(

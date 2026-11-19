@@ -1,4 +1,10 @@
-"""Valuation tables, simulated trade summaries, and reproducible report files."""
+"""Build valuation tables, summarize completed simulated trades and write report bundles.
+
+Market quote reports retain the observed bid, ask, spot, feed provenance and quality flags
+alongside a per-share model scenario. Synthetic replay reports also include an event
+ledger. The shared file writer stages CSV and JSON together so a reader can open a
+completed report directory as a unit.
+"""
 
 import csv
 from dataclasses import asdict
@@ -16,7 +22,18 @@ from options_lab.validation import quality_flags
 
 
 def closed_trade_rows(events: list[dict]):
-    """Pair fills in one chronological, single-position replay ledger."""
+    """Yield one report row for each matched buy and sell in a chronological replay ledger.
+
+    events follows the single-position simulator's event format. A buy opens the pending
+    entry and a sell for the same symbol closes it. Signals and cancellations pass through
+    without producing rows. A final unmatched buy represents an open position and
+    contributes no completed trade.
+
+    Each row includes entry and exit times, contracts, multiplier, per-share fills, total
+    fees, net USD P&L, remaining cash and exit reason. Monetary fields are Decimals. A
+    second buy before the exit or a sell without its matching entry raises ValueError as
+    the generator is consumed.
+    """
     entry = None
     for event in events:
         if event["action"] == "buy":
@@ -43,6 +60,17 @@ def closed_trade_rows(events: list[dict]):
 
 
 def valuation_rows(snapshots: list[Snapshot], settings: Settings):
+    """Yield one provenance-labelled USD valuation row per option in each input snapshot.
+
+    Use settings.quality to assess the observation clocks and quotes, and settings.model
+    for the European per-share price. An unusable underlying, unsupported currency or
+    expired contract suppresses the model value. A missing option quote can still have a
+    model value if the underlying and expiry are usable.
+
+    Calculate model_minus_ask only for a row with no quality flags. Price outputs are
+    rounded to six decimal places. Observed sides, feed names, UTC times, contract terms
+    and flags remain in the row so a reader can assess the comparison.
+    """
     for s in snapshots:
         for q in s.quotes:
             c = q.contract
@@ -95,6 +123,17 @@ def write_run(
     settings: Settings,
     simulation: dict | None = None,
 ) -> Path:
+    """Write a reproducible USD valuation or synthetic replay report under directory.
+
+    snapshots supply quote rows, inputs supply the corresponding provenance dictionaries
+    and settings records the model and simulation assumptions. Passing a simulation result
+    also saves its ledger and includes the session and execution rules in the manifest. At
+    least one quote row is required.
+
+    Return the report directory containing valuations.csv and manifest.json, with
+    replay.json for a simulated run. Its name includes a digest of the manifest, rows and
+    simulation, so repeating the same run resolves to the same directory.
+    """
     rows = list(valuation_rows(snapshots, settings))
     if not rows:
         raise ValueError("no quote rows to report")
@@ -130,7 +169,17 @@ def write_run(
 
 
 def write_report_files(target: Path, csv_name: str, columns, rows, outputs: dict) -> Path:
-    """Write the CSV and associated JSON files together as one immutable report."""
+    """Write a CSV and its associated JSON files as one completed report directory.
+
+    target is the caller's final report path. csv_name, columns and rows define the CSV,
+    including its header when rows is empty. outputs maps companion filenames to
+    JSON-serializable objects. Stage all files under the same parent, then rename the
+    completed directory into place.
+
+    Return target if a report already occupies it or if another writer finishes the same
+    target first. Serialization and unrelated filesystem errors propagate. The temporary
+    staging directory is cleaned up on exit.
+    """
     if target.is_dir():
         return target
     target.parent.mkdir(parents=True, exist_ok=True)

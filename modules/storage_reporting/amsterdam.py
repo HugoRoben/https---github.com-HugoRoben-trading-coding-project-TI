@@ -1,4 +1,10 @@
-"""Persist Amsterdam trade windows and value each print in EUR at its execution time."""
+"""Store Amsterdam execution windows and value the option prints in EUR per share.
+
+Each capture keeps its raw archive, registered terms and the share trade matched to each
+option execution. Two rolling windows may contain the same print. Read and value one named
+window or the latest matching capture to keep counts interpretable. Prices and quality
+statuses in the report use the model settings supplied at read time.
+"""
 
 from dataclasses import asdict
 from pathlib import Path
@@ -33,10 +39,27 @@ REPORT_COLUMNS = ("capture_id", *TRADE_COLUMNS, "stock_age_s", "model_eur", "val
 
 
 def amsterdam_database(directory: Path):
+    """Return a context manager for the Amsterdam SQLite store under directory.
+
+    The database filename is amsterdam.sqlite3. Entering the context creates the directory
+    and tables if needed, enables foreign keys and yields a connection with named columns.
+    The Amsterdam schema stores execution windows and matched trade rows independently of
+    the USD quote database.
+    """
     return database(directory / "amsterdam.sqlite3", schema="amsterdam.sql")
 
 
 def recent_windows(db, settings: AmsterdamSettings, limit: int) -> list[dict]:
+    """Summarize the latest saved windows for the share and option class in settings.
+
+    On the open Amsterdam connection db, group option rows by capture and return at most
+    limit dictionaries in descending retrieval order. Each contains the trading day, window
+    label, execution count, distinct traded series and latest execution time. Empty
+    captures appear with zero counts and a null latest trade time.
+
+    limit must be positive. Counts describe individual windows and can overlap when the
+    collector polls more often than the length of a window.
+    """
     if limit < 1:
         raise ValueError("limit must be positive")
     return [
@@ -53,6 +76,17 @@ def recent_windows(db, settings: AmsterdamSettings, limit: int) -> list[dict]:
 
 
 def save_window(db, raw: dict, directory: Path, settings: AmsterdamSettings) -> tuple[str, int]:
+    """Archive one Amsterdam window and persist its eligible option executions.
+
+    Validate raw against settings.euronext and derive its normalized trade rows, then write
+    the native payload under directory/raw/euronext. The archive digest becomes the capture
+    ID. On db, insert the capture and all its rows in one transaction. An empty window
+    still records the retrieval.
+
+    Return the capture ID and the count of eligible executions in the input, including on
+    reimport. A matching digest reuses the existing database rows. A database failure rolls
+    back that transaction, and the already saved raw file remains available for a retry.
+    """
     observations = trade_rows(raw, settings.euronext)
     path = archive(raw, directory / "raw" / "euronext")
     capture_id = path.stem
@@ -76,6 +110,19 @@ def save_window(db, raw: dict, directory: Path, settings: AmsterdamSettings) -> 
 
 
 def read_report(db, settings: AmsterdamSettings, capture_id: str | None = None):
+    """Read one Amsterdam window and value each option at its execution time.
+
+    Filter db by the share ISIN and option class in settings. An explicit capture_id pins
+    the result. Otherwise select the latest matching capture. For each trade, measure share
+    age and use the matched share price, observed strike and remaining ACT/365F term in the
+    configured European pricing scenario.
+
+    Return a pair of capture metadata and trade dictionaries, newest execution first. A
+    missing or stale share trade or a trade past expiry yields a status and an empty model
+    value. Valid model prices are rounded to six decimals in EUR per share. A missing
+    capture returns (None, []), while a saved empty window returns its metadata and an
+    empty list.
+    """
     market = settings.euronext
     filters = "share_isin=? AND option_class=?"
     args = [market.share_isin, market.option_class]
@@ -125,6 +172,17 @@ def read_report(db, settings: AmsterdamSettings, capture_id: str | None = None):
 
 
 def write_trade_report(directory: Path, info, rows, settings: AmsterdamSettings) -> Path:
+    """Export one valued Amsterdam window and its provenance under directory.
+
+    Pass the info and rows returned by read_report together with the settings used for
+    valuation. The CSV includes execution prices, share matches, model values and statuses.
+    The manifest records the capture identity, data sources, reporting delay, currency,
+    scenario assumptions and execution count.
+
+    Return the report directory named from a digest of the manifest and rows. A window with
+    zero trades still produces a manifest and a CSV header. Repeating the same export
+    resolves to the same path.
+    """
     manifest = {
         "capture": info,
         "settings": asdict(settings),

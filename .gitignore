@@ -1,3 +1,4 @@
+# Local macOS, Python and Jupyter working files have machine-specific contents.
 .DS_Store
 .venv/
 __pycache__/
@@ -6,9 +7,11 @@ __pycache__/
 .ruff_cache/
 .ipynb_checkpoints/
 *.local.ipynb
+# Only the blank credential template belongs in the repository.
 .env
 .env.*
 !/.env.example
+# SQLite sidecars, provider archives and generated reports belong to local runs.
 *.db
 *.db-*
 *.sqlite

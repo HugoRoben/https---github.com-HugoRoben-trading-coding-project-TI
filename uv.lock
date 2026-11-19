@@ -1,3 +1,5 @@
+# uv's resolution for the virtual project declared in pyproject.toml. The CLI has no
+# third-party runtime dependencies. Notebook-only pins are in notebooks/requirements.txt.
 version = 1
 revision = 3
 requires-python = ">=3.11"

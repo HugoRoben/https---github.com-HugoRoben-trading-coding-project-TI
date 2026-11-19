@@ -1,3 +1,11 @@
+"""Load the bundled synthetic option session for deterministic demos and tests.
+
+The JSON fixture provides invented USD quotes, contract terms, observation times and a
+scheduled session close. Store the constructed snapshots in the demo database and use their
+hashes to check the exact inputs on subsequent replay. This file is also the source of the
+default test frames for storage and accounting.
+"""
+
 import json
 
 from .config import ROOT
@@ -7,6 +15,17 @@ FIXTURE = ROOT / "tests/fixtures/demo.json"
 
 
 def fixture_inputs():
+    """Read the bundled fixture and return its planned close and ordered capture inputs.
+
+    Construct the option contracts once and build a Snapshot for each observation in
+    fixture order. Parse all supplied timestamps as aware UTC times and retain any missing
+    quotes or stock observation time. Every snapshot carries synthetic source and feed
+    labels.
+
+    Return (close_at, inputs), where each entry in inputs is a (snapshot, input_hash) pair.
+    The digest covers the underlying, expiry, original contract records and that
+    observation. This lets a later replay detect changes to an individual stored input.
+    """
     data = json.loads(FIXTURE.read_text())
     contracts = [
         Contract(underlying=data["underlying"], expiry_at=parse_time(data["expiry_at"]), **fields)

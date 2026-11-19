@@ -1,3 +1,11 @@
+"""Run the local collection, valuation and synthetic replay commands.
+
+The parser defines one set of paths and subcommands for the terminal and notebooks. The
+selected TOML profile routes work to Alpaca USD snapshots or Euronext Amsterdam EUR trade
+windows. Each completed collection can be archived and imported separately. Valuation
+commands return a report path for callers that want to inspect the outputs.
+"""
+
 import argparse
 from datetime import date
 import json
@@ -33,6 +41,17 @@ from .validation import quality_flags
 
 
 def save_market(db, raw, directory, quality):
+    """Normalize, archive and store one raw Alpaca capture and print an ingest summary.
+
+    db is the open USD market database. directory is its data root, used for both the raw
+    archive and its relative database reference. quality sets the flags recorded for each
+    quote and the count shown in the progress message. An existing capture with matching
+    input is reported as already present.
+
+    The raw archive is written before the SQLite transaction, so it can be reimported after
+    a database failure. This helper returns None. Malformed captures, conflicting IDs and
+    storage errors propagate to the command boundary.
+    """
     snapshot = normalize(raw)
     path = archive(raw, directory / "raw")
     new = save_snapshot(db, snapshot, str(path.relative_to(directory)), digest(raw), quality)
@@ -45,6 +64,13 @@ def save_market(db, raw, directory, quality):
 
 
 def positive_int(value):
+    """Parse a strictly positive whole number supplied to the command-line parser.
+
+    Convert value with int and return the result when it is at least one. A zero or
+    negative result raises argparse.ArgumentTypeError, and noninteger text raises a
+    conversion error that argparse reports to the caller. The collector uses this for both
+    capture count and interval seconds.
+    """
     n = int(value)
     if n < 1:
         raise argparse.ArgumentTypeError("expected a positive integer")
@@ -52,6 +78,16 @@ def positive_int(value):
 
 
 def parser():
+    """Build the argument parser shared by the shell entry point and both notebooks.
+
+    Global options select the configuration file, data root and report root. The required
+    subcommand chooses database initialization, collection, raw import, valuation, demo or
+    replay. Collection accepts a count, pause and optional exact expiry. Valuation accepts
+    a capture ID for repeatability.
+
+    Return the configured ArgumentParser. Parsing and dispatch are separate, so a notebook
+    can construct the same argument namespace and receive the report directory from run.
+    """
     p = argparse.ArgumentParser(
         prog="python -m options_lab",
         description="Local options collection, valuation and synthetic replay",
@@ -83,6 +119,17 @@ def parser():
 
 
 def run_amsterdam(args, settings: AmsterdamSettings) -> Path | None:
+    """Dispatch a parsed command against the Amsterdam execution database.
+
+    args supplies paths and command options. settings selects the exchange share, option
+    class, capture window and pricing assumptions. Collection retrieves and commits each
+    delayed window separately, and import-capture can rebuild it from archived JSON. The
+    value command reads a pinned or latest matching capture and writes a EUR trade report.
+
+    Return the directory for value and None for initialization, import or collection. A
+    missing valuation capture or a request for the USD synthetic demo or replay under this
+    profile raises ValueError.
+    """
     market = settings.euronext
     if args.command in ("demo", "replay"):
         raise ValueError(
@@ -120,7 +167,18 @@ def run_amsterdam(args, settings: AmsterdamSettings) -> Path | None:
 
 
 def run(args) -> Path | None:
-    """Run a project command and return its saved report directory when applicable."""
+    """Execute a parsed project command and return a report path when one is produced.
+
+    Load args.config and dispatch Amsterdam work to run_amsterdam. Under the U.S. profile,
+    market collection and valuation use options.sqlite3. The demo and replay use
+    demo.sqlite3, and both verify stored input hashes against the bundled fixture before
+    replay. demo loads missing fixture captures first.
+
+    Collect and import write raw market data and normalized quotes. value reports either a
+    requested market snapshot or the latest stored one. A report-producing command prints
+    its summary and returns its directory. Other successful commands return None.
+    Exceptions propagate to the caller for notebook display or CLI handling.
+    """
     settings = load_settings(args.config)
     if isinstance(settings, AmsterdamSettings):
         return run_amsterdam(args, settings)
@@ -174,6 +232,16 @@ def run(args) -> Path | None:
 
 
 def main(argv=None):
+    """Run the shell entry point and return its process exit status.
+
+    argv may be a sequence of argument strings. The default lets argparse read the process
+    arguments. After successful parsing, dispatch through run. Return 0 on success, 1 after
+    reporting a handled input, file or database error to stderr, or 130 when interrupted.
+    Previously completed captures survive an interrupted session.
+
+    Argument parsing occurs before command error handling, so help and invalid syntax
+    follow argparse's usual SystemExit behavior.
+    """
     args = parser().parse_args(argv)
     try:
         run(args)

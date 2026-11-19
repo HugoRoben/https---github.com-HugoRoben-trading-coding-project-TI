@@ -1,4 +1,10 @@
-"""Pair each ordinary option execution with an earlier Amsterdam share execution."""
+"""Reconcile Amsterdam trade publications and pair option executions with share prices.
+
+Within a captured window the latest publication for each trade identifier decides whether
+the print is eligible. Each retained option record includes its contract terms, execution
+price and the most recent share trade already published by that execution time. Those two
+timestamps matter when the result is used as an input to pricing.
+"""
 
 from bisect import bisect_right
 from datetime import date, datetime, time
@@ -12,6 +18,15 @@ from .retrieval import AMSTERDAM, FORMAT, matches_class
 
 
 class Execution(NamedTuple):
+    """Represent an eligible publication after reconciliation by trade identifier.
+
+    traded and published are timezone-aware UTC instants from the tape. trade_id identifies
+    the execution and isin identifies the instrument. price is the reported EUR price per
+    share. quantity is the exchange-reported size, in shares on the cash tape or contracts
+    on the option tape. Tuple ordering puts execution time first and publication time
+    second.
+    """
+
     traded: datetime
     published: datetime
     trade_id: str
@@ -21,6 +36,13 @@ class Execution(NamedTuple):
 
 
 def positive(value) -> float | None:
+    """Convert a trade or contract field to a strictly positive finite float.
+
+    Accept numeric strings or numbers. Return None for blank or missing values, zero,
+    negative amounts, NaN or infinities. A nonnumeric nonempty value raises a conversion
+    error. Callers use the result to drop unusable prints, reject invalid strikes or
+    preserve an unknown multiplier.
+    """
     if value in ("", None):
         return None
     number = float(value)
@@ -28,6 +50,17 @@ def positive(value) -> float | None:
 
 
 def ordinary_trades(rows, venue, isins, day, retrieved) -> list[Execution]:
+    """Resolve publications into ordinary EUR executions as known at capture time.
+
+    rows are native records for venue, the eligible isins and local trading day. Require an
+    identifier and execution and publication times in chronological order up to retrieved.
+    For each identifier keep its latest publication. Identical repeats coalesce, while
+    conflicting rows at the same publication time raise ValueError.
+
+    Return sorted Execution records for unmodified monetary prints with positive price and
+    size. A cancellation or amendment on the latest publication excludes that identifier
+    from the window. A mismatched venue, instrument or trading date also raises ValueError.
+    """
     # A later cancellation or amendment disqualifies the original print in this window.
     latest = {}
     for row in rows:
@@ -72,6 +105,19 @@ def ordinary_trades(rows, venue, isins, day, retrieved) -> list[Execution]:
 
 
 def trade_rows(raw: dict, market: AmsterdamMarket) -> list[dict]:
+    """Join ordinary option trades to their registered terms and an observable share price.
+
+    Verify that raw belongs to market and reconcile each tape for the stated trading day.
+    For each option print, select the most recent share execution whose trade time and
+    publication time are both at or before the option trade. If none qualifies, retain the
+    option and leave the share fields empty.
+
+    Return chronological dictionaries with UTC timestamps, EUR prices per share, contract
+    quantity, exercise style, multiplier and share-trade ID. Use the registered termination
+    time when it falls on the expiry date. Otherwise assume 17:30 Amsterdam time and mark
+    the cutoff as assumed. Conflicting references, out-of-range expiries and invalid
+    strikes raise ValueError. The reporting layer applies the share-age limit.
+    """
     if raw["format"] != FORMAT or (raw["underlying"], raw["share_isin"], raw["option_class"]) != (
         market.underlying,
         market.share_isin,

@@ -1,4 +1,7 @@
 # Notebook-only dependencies, tested with the project's Python 3.12 environment.
+# Install in the environment selected as the notebook kernel. ipykernel runs the
+# cells, pandas builds SQL and report previews, and python-dotenv reads local Alpaca
+# settings. The command-line pipeline and its offline tests use the standard library.
 ipykernel==6.29.4
 pandas==2.2.2
 python-dotenv==1.2.2

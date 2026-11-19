@@ -1,4 +1,10 @@
-"""Collect a bounded session of stock and option quotes from Alpaca."""
+"""Collect a fixed selection of Alpaca option contracts over one supervised session.
+
+The first usable IEX stock midpoint determines the strike band and the first matching
+expiry. Each collection interval retrieves a new stock quote and the latest indicative
+quotes for the selected symbols. The resulting dictionaries carry the catalog pages,
+selection inputs and retrieval times needed to reconstruct the observations.
+"""
 
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -19,7 +25,17 @@ def iter_captures(
     interval_seconds: int | None = None,
     expiry: date | None = None,
 ) -> Iterator[dict]:
-    """Yield one raw capture at a time, reusing the first selection for the session."""
+    """Yield one completed raw capture at a time for a single collection session.
+
+    config supplies the underlying, expiry window, strike selection and default pause.
+    count bounds the number of captures. interval_seconds overrides the pause between
+    captures, and expiry restricts the first catalog search to a listed date. Both count
+    and the effective interval must be positive.
+
+    The first request runs when iteration starts. Later captures reuse the selected
+    contract universe and are separated by a sleep. Results already yielded can be archived
+    independently if a subsequent request fails or the session is interrupted.
+    """
     pause = config.interval_seconds if interval_seconds is None else interval_seconds
     if count < 1 or pause <= 0:
         raise ValueError("count and interval_seconds must be positive")
@@ -36,7 +52,17 @@ def iter_captures(
 def fetch_capture(
     get, config: Collection, expiry: date | None = None, universe: dict | None = None
 ) -> dict:
-    """Fetch the stock quote, select contracts if needed, then fetch their option quotes."""
+    """Retrieve one U.S. stock quote and a batch of indicative option quotes.
+
+    get must accept an endpoint URL and query mapping and return decoded JSON. With
+    universe omitted, use the latest stock midpoint and config to select contracts,
+    optionally for expiry. An unusable initial midpoint raises AlpacaError. Passing a
+    previous universe reuses its selection even if the stock has moved.
+
+    Return the original responses, selection metadata, feed labels, a fresh capture ID, the
+    stock receipt time and the final retrieval time. Both local timestamps are UTC.
+    Normalization, quality checks and persistence happen downstream.
+    """
     symbol = config.underlying
     stock = get(f"{DATA_URL}/v2/stocks/{symbol}/quotes/latest", {"feed": "iex", "currency": "USD"})
     stock_received = datetime.now(UTC)
@@ -69,7 +95,18 @@ def fetch_capture(
 def select_universe(
     get, config: Collection, spot: float, now: datetime, expiry: date | None
 ) -> dict:
-    """Read every catalog page and choose the nearest strikes at the earliest matching expiry."""
+    """Select nearby strikes at the earliest expiry returned by the contract catalog.
+
+    Use spot in USD per share to build a symmetric strike band. Derive calendar-day expiry
+    bounds from now in New York, or request the exact future date supplied as expiry.
+    Follow every catalog page through get and retain eligible calls and puts for the
+    configured underlying and root.
+
+    Rank distinct strikes by distance to spot, resolving ties in favor of the lower strike.
+    Return their sorted symbols with the original query, pages, selection time and spot.
+    Empty selections, repeated page tokens, duplicate selected symbols and selections over
+    100 symbols raise AlpacaError.
+    """
     today = now.astimezone(NEW_YORK).date()
     if expiry and expiry <= today:
         raise ValueError("choose a listed expiry after today (New York date)")
